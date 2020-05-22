@@ -125,18 +125,29 @@ public final class SingleProducerSequencer extends SingleProducerSequencerFields
 
         long nextSequence = nextValue + n;
         long wrapPoint = nextSequence - bufferSize;
+        //消费者已经消费到的位置
         long cachedGatingSequence = this.cachedValue;
-
+        // wrapPoint < 0 表示buffer没有使用完，还有可用空间，因此不要处理
+        //
+        // wrapPoint >= 0 表示buffer已经被消费者使用完了至少一遍了，因此需要是否有位置给生产者使用
+        // 如何确定是否有位置给生产使用？
+        // 验证wrapPoint是否小于所有生产者都已经消费过的位置(min(gatingSequences))，我们把这个位置位置之前的认为可以使用的位置
+        // 如果可以使用的位置大于等于wrapPoint，那么表示直接使用
+        // 如果可以使用的位置小于wrapPoint，那么需要等消费者消费完毕后才能使用，否则会覆盖数据。
         if (wrapPoint > cachedGatingSequence || cachedGatingSequence > nextValue)
         {
             cursor.setVolatile(nextValue);  // StoreLoad fence
 
             long minSequence;
+            // minSequence就是所有消费者消费到的最小位置
+            // 如果wrapPoint > minSequence表示没有足够的空间让生产者申请，因此需要等待
+            // 等待1ns验证一次。
             while (wrapPoint > (minSequence = Util.getMinimumSequence(gatingSequences, nextValue)))
             {
                 LockSupport.parkNanos(1L); // TODO: Use waitStrategy to spin?
             }
-
+            //minSequence是消费者的信息，可能消费者消费处理完了，生产者没来得及更新，因此需要更新缓存。
+            //因为这里是单个生产者，不存在多线程竞争，缓存可以提升效率。
             this.cachedValue = minSequence;
         }
 
@@ -182,9 +193,21 @@ public final class SingleProducerSequencer extends SingleProducerSequencerFields
     public long remainingCapacity()
     {
         long nextValue = this.nextValue;
-
+        //已经消费到的位置
         long consumed = Util.getMinimumSequence(gatingSequences, nextValue);
+        //生产者下一个可以放入的位置
         long produced = nextValue;
+
+        // 1. next是生产者下一个可以放入的位置
+        // 2. cursor是最后一个commit的数据的位置
+        // 3. consumed是所有消费都已经消费到的一个位置。在consumed之前的位置都是可以回收的空间
+        //
+        // +----------+------+--------+------+-------+
+        // | consumed | .... | cursor | .... | next  |
+        // +----------+------+--------+------+-------+
+        //
+        // next-consumed之间的数据表示没有消费到和正在提交的数据，这一部分是不能清理的
+        // 可以空间 = bufferSize - (next - consumed);
         return getBufferSize() - (produced - consumed);
     }
 

@@ -36,10 +36,41 @@ public final class MultiProducerSequencer extends AbstractSequencer
     private static final long BASE = UNSAFE.arrayBaseOffset(int[].class);
     private static final long SCALE = UNSAFE.arrayIndexScale(int[].class);
 
+    /**
+     * gatingSequenceCache是所有消费者都已经消费完毕的序号的最小值的缓存，在这个值之前的sequence都是可以让生产者使用的。
+     * 这里缓存有一个好处，如果还剩余很多的空间可以供生产者使用，next函数拿到的值小于gatingSequenceCache，
+     * 那么不需要重新从各个消费者sequence中读取最小值计算，直接分配空间，让生产者使用，以此提高性能
+     */
     private final Sequence gatingSequenceCache = new Sequence(Sequencer.INITIAL_CURSOR_VALUE);
 
     // availableBuffer tracks the state of each ringbuffer slot
     // see below for more details on the approach
+    /**
+     * <pre>
+     * availableBuffer的存在是为了避免多个生产者publisher线程共享同一个sequence对象。
+     *
+     * availableBuffer的初始值都为-1。详见{@link MultiProducerSequencer#initialiseAvailableBuffer()}
+     *
+     * 在生产者调用publish方法的时候，将对应的sequence存储在availableBuffer中。
+     * availableBuffer是一个int类型的数组，其存储方式如下
+     *     index = sequence % bufferSize
+     *     round = sequence / bufferSize
+     *
+     *     availableBuffer[index] = round
+     *
+     *
+     *
+     *
+     * -- 首先，我们有一个限制，即cursor和 最小的gating sequence之差永远不会大于缓冲区的大小。
+     *
+     * -- 通过模运算作为缓冲区的索引
+     *
+     * -- 通过除法运算，得到sequence高位部分为的检查可用性的值，这个值能告诉我们已经在ringBuffer中运行了多少次。
+     *
+     * -- 因为我们不能在gating sequences不向前移动的情况下进行包装(即
+     * 最小选通序列(minimum gating sequence)是我们在缓冲区中最后一个有效的可用位置)，当我们有新数据并成功地声明一个插槽时，我们可以简单地在上面写入。
+     * </pre>
+     */
     private final int[] availableBuffer;
     private final int indexMask;
     private final int indexShift;
@@ -126,6 +157,13 @@ public final class MultiProducerSequencer extends AbstractSequencer
 
             long wrapPoint = next - bufferSize;
             long cachedGatingSequence = gatingSequenceCache.get();
+            // wrapPoint < 0 表示buffer没有使用完，还有可用空间，因此不要处理
+            //
+            // wrapPoint >= 0 表示buffer已经被消费者使用完了至少一遍了，因此需要是否有位置给生产者使用
+            // 如何确定是否有位置给生产使用？
+            // 验证wrapPoint是否小于所有生产者都已经消费过的位置(min(gatingSequences))，我们把这个位置位置之前的认为可以使用的位置
+            // 如果可以使用的位置大于等于wrapPoint，那么表示直接使用
+            // 如果可以使用的位置小于wrapPoint，那么需要等消费者消费完毕后才能使用，否则会覆盖数据。
 
             if (wrapPoint > cachedGatingSequence || cachedGatingSequence > current)
             {
@@ -139,6 +177,7 @@ public final class MultiProducerSequencer extends AbstractSequencer
 
                 gatingSequenceCache.set(gatingSequence);
             }
+            //通过cas设置cursor
             else if (cursor.compareAndSet(current, next))
             {
                 break;
@@ -193,6 +232,16 @@ public final class MultiProducerSequencer extends AbstractSequencer
     @Override
     public long remainingCapacity()
     {
+        // 1. next是生产者下一个可以放入的位置
+        // 2. cursor是最后一个commit的数据的位置
+        // 3. consumed是所有消费都已经消费到的一个位置。在consumed之前的位置都是可以回收的空间
+        //
+        // +----------+------+--------+------+-------+
+        // | consumed | .... | cursor | .... | next  |
+        // +----------+------+--------+------+-------+
+        //
+        // next-consumed之间的数据表示没有消费到和正在提交的数据，这一部分是不能清理的
+        // 可以空间 = bufferSize - (next - consumed);
         long consumed = Util.getMinimumSequence(gatingSequences, cursor.get());
         long produced = cursor.get();
         return getBufferSize() - (produced - consumed);
@@ -214,6 +263,7 @@ public final class MultiProducerSequencer extends AbstractSequencer
     @Override
     public void publish(final long sequence)
     {
+        //可以获得的位置，available是可获得的意思，这里表示更新生产者可获得的sequence。
         setAvailable(sequence);
         waitStrategy.signalAllWhenBlocking();
     }
@@ -250,8 +300,24 @@ public final class MultiProducerSequencer extends AbstractSequencer
      * buffer), when we have new data and successfully claimed a slot we can simply
      * write over the top.
      */
+    /**
+     * 下面的方法处理availableBuffer标志
+     *
+     * 主要原因是避免多个publisher（生产者提交）线程共享同一个sequence对象。（保持单指针跟踪开始和结束需要线程之间的协调）
+     *
+     * -- 首先，我们有一个限制，即cursor和 最小的gating sequence之差永远不会大于缓冲区的大小。
+     *
+     * -- 通过模运算作为缓冲区的索引
+     *
+     * -- 通过除法运算，得到sequence高位部分为的检查可用性的值，这个值能告诉我们已经在ringBuffer中运行了多少次。
+     *
+     * -- 因为我们不能在gating sequences不向前移动的情况下进行包装(即
+     * 最小选通序列(minimum gating sequence)是我们在缓冲区中最后一个有效的可用位置)，当我们有新数据并成功地声明一个插槽时，我们可以简单地在上面写入。
+     *
+     */
     private void setAvailable(final long sequence)
     {
+        //一个数字n  n = bufferSize* m + n % bufferSize;
         setAvailableBufferValue(calculateIndex(sequence), calculateAvailabilityFlag(sequence));
     }
 
@@ -267,7 +333,9 @@ public final class MultiProducerSequencer extends AbstractSequencer
     @Override
     public boolean isAvailable(long sequence)
     {
+        // index = sequence % bufferSize
         int index = calculateIndex(sequence);
+        // flag = sequence / bufferSize
         int flag = calculateAvailabilityFlag(sequence);
         long bufferAddress = (index * SCALE) + BASE;
         return UNSAFE.getIntVolatile(availableBuffer, bufferAddress) == flag;
@@ -289,11 +357,17 @@ public final class MultiProducerSequencer extends AbstractSequencer
 
     private int calculateAvailabilityFlag(final long sequence)
     {
+        //等价 sequence除以2的indexShift次幂
+        // bufferSize = math.pow(2, indexShift)
+        //因此 这里等价 sequence / bufferSize
         return (int) (sequence >>> indexShift);
     }
 
     private int calculateIndex(final long sequence)
     {
+        //等价 sequence % (indexMask + 1)
+        //因为bufferSize = indexMask + 1;
+        // 这里其实就是 sequence % bufferSize
         return ((int) sequence) & indexMask;
     }
 }

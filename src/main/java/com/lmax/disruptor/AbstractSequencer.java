@@ -33,6 +33,7 @@ public abstract class AbstractSequencer implements Sequencer
     protected final int bufferSize;
     protected final WaitStrategy waitStrategy;
     protected final Sequence cursor = new Sequence(Sequencer.INITIAL_CURSOR_VALUE);
+    //各个消费者处理程序消费到的位置sequence。gatingSequences的共同最小值，表示消费真都消费完毕的位置，在这之前的位置都是可以让生产者使用的
     protected volatile Sequence[] gatingSequences = new Sequence[0];
 
     /**

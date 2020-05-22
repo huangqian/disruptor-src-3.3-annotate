@@ -26,10 +26,13 @@ import java.util.*;
  */
 class ConsumerRepository<T> implements Iterable<ConsumerInfo>
 {
+    //消费者处理Handler和Event的相关信息的Map
     private final Map<EventHandler<?>, EventProcessorInfo<T>> eventProcessorInfoByEventHandler =
         new IdentityHashMap<EventHandler<?>, EventProcessorInfo<T>>();
+    //消费者Sequence和消费者信息
     private final Map<Sequence, ConsumerInfo> eventProcessorInfoBySequence =
         new IdentityHashMap<Sequence, ConsumerInfo>();
+    //所有的消费者
     private final Collection<ConsumerInfo> consumerInfos = new ArrayList<ConsumerInfo>();
 
     public void add(

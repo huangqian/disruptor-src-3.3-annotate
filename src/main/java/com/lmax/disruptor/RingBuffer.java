@@ -28,6 +28,7 @@ abstract class RingBufferPad
 
 abstract class RingBufferFields<E> extends RingBufferPad
 {
+    //用于填充entries左右两侧，BUFFER_PAD = 32 or 16
     private static final int BUFFER_PAD;
     private static final long REF_ARRAY_BASE;
     private static final int REF_ELEMENT_SHIFT;
@@ -35,6 +36,7 @@ abstract class RingBufferFields<E> extends RingBufferPad
 
     static
     {
+        //确定数组中每个元素占用的大小
         final int scale = UNSAFE.arrayIndexScale(Object[].class);
         if (4 == scale)
         {
@@ -90,6 +92,9 @@ abstract class RingBufferFields<E> extends RingBufferPad
     @SuppressWarnings("unchecked")
     protected final E elementAt(long sequence)
     {
+        // indexMask = bufferSize - 1
+        // bufferSize永远是2的幂次
+        // sequence & indexMask 其实就是 sequence % bufferSize
         return (E) UNSAFE.getObject(entries, REF_ARRAY_BASE + ((sequence & indexMask) << REF_ELEMENT_SHIFT));
     }
 }
