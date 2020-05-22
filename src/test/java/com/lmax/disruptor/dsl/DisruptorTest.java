@@ -20,6 +20,7 @@ import com.lmax.disruptor.BlockingWaitStrategy;
 import com.lmax.disruptor.EventHandler;
 import com.lmax.disruptor.EventProcessor;
 import com.lmax.disruptor.EventTranslator;
+import com.lmax.disruptor.EventTranslatorOneArg;
 import com.lmax.disruptor.ExceptionHandler;
 import com.lmax.disruptor.FatalExceptionHandler;
 import com.lmax.disruptor.RingBuffer;
@@ -134,6 +135,40 @@ public class DisruptorTest
         }
     }
 
+
+    @Test
+    public void shouldBatchOfEvents() throws Exception
+    {
+        final CountDownLatch eventCounter = new CountDownLatch(2);
+        disruptor.handleEventsWith(new EventHandler<TestEvent>()
+        {
+            @Override
+            public void onEvent(final TestEvent event, final long sequence, final boolean endOfBatch) throws Exception
+            {
+                eventCounter.countDown();
+            }
+        });
+
+        disruptor.start();
+
+        disruptor.publishEvents(
+            new EventTranslatorOneArg<TestEvent, Object>()
+            {
+                @Override
+                public void translateTo(final TestEvent event, final long sequence, Object arg)
+                {
+                    lastPublishedEvent = event;
+                }
+            },
+            new Object[] { "a", "b" }
+        );
+
+        if (!eventCounter.await(5, TimeUnit.SECONDS))
+        {
+            fail("Did not process event published before start was called. Missed events: " + eventCounter.getCount());
+        }
+    }
+
     @Test
     public void shouldAddEventProcessorsAfterPublishing() throws Exception
     {
@@ -219,7 +254,7 @@ public class DisruptorTest
         disruptor.start();
 
         assertNotNull(eventHandlerGroup);
-        assertThat(Integer.valueOf(executor.getExecutionCount()), equalTo(Integer.valueOf(2)));
+        assertThat(executor.getExecutionCount(), equalTo(2));
     }
 
     @Test
@@ -248,7 +283,7 @@ public class DisruptorTest
     }
 
     @Test
-    public void should()
+    public void shouldSupportAddingCustomEventProcessorWithFactory()
         throws Exception
     {
         RingBuffer<TestEvent> rb = disruptor.getRingBuffer();
@@ -268,6 +303,8 @@ public class DisruptorTest
         disruptor.handleEventsWith(b1).then(b2);
 
         disruptor.start();
+
+        assertThat(executor.getExecutionCount(), equalTo(2));
     }
 
     @Test
@@ -284,6 +321,8 @@ public class DisruptorTest
         disruptor.after(handler1, handler2).handleEventsWith(handlerWithBarrier);
 
         ensureTwoEventsProcessedAccordingToDependencies(countDownLatch, handler1, handler2);
+
+        assertThat(executor.getExecutionCount(), equalTo(3));
     }
 
     @Test
@@ -301,6 +340,8 @@ public class DisruptorTest
         disruptor.after(handler1).and(handler2Group).handleEventsWith(handlerWithBarrier);
 
         ensureTwoEventsProcessedAccordingToDependencies(countDownLatch, handler1, handler2);
+
+        assertThat(executor.getExecutionCount(), equalTo(3));
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -323,6 +364,7 @@ public class DisruptorTest
         disruptor.after(handler2);
     }
 
+    @SuppressWarnings("deprecation")
     @Test
     public void shouldSupportSpecifyingAExceptionHandlerForEventProcessors()
         throws Exception
@@ -341,6 +383,7 @@ public class DisruptorTest
         assertSame(testException, actualException);
     }
 
+    @SuppressWarnings("deprecation")
     @Test
     public void shouldOnlyApplyExceptionsHandlersSpecifiedViaHandleExceptionsWithOnNewEventProcessors()
         throws Exception
@@ -481,6 +524,8 @@ public class DisruptorTest
         disruptor.handleEventsWith(processor).then(handlerWithBarrier);
 
         ensureTwoEventsProcessedAccordingToDependencies(countDownLatch, delayedEventHandler);
+
+        assertThat(executor.getExecutionCount(), equalTo(2));
     }
 
     @Test
@@ -501,6 +546,8 @@ public class DisruptorTest
         disruptor.handleEventsWith(processor);
 
         ensureTwoEventsProcessedAccordingToDependencies(countDownLatch, delayedEventHandler);
+
+        assertThat(executor.getExecutionCount(), equalTo(2));
     }
 
     @Test
@@ -522,6 +569,30 @@ public class DisruptorTest
         disruptor.after(delayedEventHandler1).and(processor).handleEventsWith(handlerWithBarrier);
 
         ensureTwoEventsProcessedAccordingToDependencies(countDownLatch, delayedEventHandler1, delayedEventHandler2);
+
+        assertThat(executor.getExecutionCount(), equalTo(3));
+    }
+
+    @Test
+    public void shouldSupportMultipleCustomProcessorsAsDependencies() throws Exception
+    {
+        final RingBuffer<TestEvent> ringBuffer = disruptor.getRingBuffer();
+        final CountDownLatch countDownLatch = new CountDownLatch(2);
+        final EventHandler<TestEvent> handlerWithBarrier = new EventHandlerStub<>(countDownLatch);
+
+        final DelayedEventHandler delayedEventHandler1 = createDelayedEventHandler();
+        final BatchEventProcessor<TestEvent> processor1 =
+                new BatchEventProcessor<>(ringBuffer, ringBuffer.newBarrier(), delayedEventHandler1);
+
+        final DelayedEventHandler delayedEventHandler2 = createDelayedEventHandler();
+        final BatchEventProcessor<TestEvent> processor2 =
+                new BatchEventProcessor<>(ringBuffer, ringBuffer.newBarrier(), delayedEventHandler2);
+
+        disruptor.handleEventsWith(processor1, processor2);
+        disruptor.after(processor1, processor2).handleEventsWith(handlerWithBarrier);
+
+        ensureTwoEventsProcessedAccordingToDependencies(countDownLatch, delayedEventHandler1, delayedEventHandler2);
+        assertThat(executor.getExecutionCount(), equalTo(3));
     }
 
     @Test

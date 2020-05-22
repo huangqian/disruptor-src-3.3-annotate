@@ -45,7 +45,7 @@ public class EventHandlerGroup<T>
     }
 
     /**
-     * Create a new event handler group that combines the consumers in this group with <tt>otherHandlerGroup</tt>.
+     * Create a new event handler group that combines the consumers in this group with <code>otherHandlerGroup</code>.
      *
      * @param otherHandlerGroup the event handler group to combine.
      * @return a new EventHandlerGroup combining the existing and new consumers into a single dependency group.
@@ -57,11 +57,11 @@ public class EventHandlerGroup<T>
         System.arraycopy(
             otherHandlerGroup.sequences, 0,
             combinedSequences, this.sequences.length, otherHandlerGroup.sequences.length);
-        return new EventHandlerGroup<T>(disruptor, consumerRepository, combinedSequences);
+        return new EventHandlerGroup<>(disruptor, consumerRepository, combinedSequences);
     }
 
     /**
-     * Create a new event handler group that combines the handlers in this group with <tt>processors</tt>.
+     * Create a new event handler group that combines the handlers in this group with <code>processors</code>.
      *
      * @param processors the processors to combine.
      * @return a new EventHandlerGroup combining the existing and new processors into a single dependency group.
@@ -77,7 +77,7 @@ public class EventHandlerGroup<T>
         }
         System.arraycopy(sequences, 0, combinedSequences, processors.length, sequences.length);
 
-        return new EventHandlerGroup<T>(disruptor, consumerRepository, combinedSequences);
+        return new EventHandlerGroup<>(disruptor, consumerRepository, combinedSequences);
     }
 
     /**
@@ -92,7 +92,8 @@ public class EventHandlerGroup<T>
      * @param handlers the batch handlers that will process events.
      * @return a {@link EventHandlerGroup} that can be used to set up a event processor barrier over the created event processors.
      */
-    public EventHandlerGroup<T> then(final EventHandler<? super T>... handlers)
+    @SafeVarargs
+    public final EventHandlerGroup<T> then(final EventHandler<? super T>... handlers)
     {
         return handleEventsWith(handlers);
     }
@@ -107,7 +108,8 @@ public class EventHandlerGroup<T>
      * @param eventProcessorFactories the event processor factories to use to create the event processors that will process events.
      * @return a {@link EventHandlerGroup} that can be used to chain dependencies.
      */
-    public EventHandlerGroup<T> then(final EventProcessorFactory<T>... eventProcessorFactories)
+    @SafeVarargs
+    public final EventHandlerGroup<T> then(final EventProcessorFactory<T>... eventProcessorFactories)
     {
         return handleEventsWith(eventProcessorFactories);
     }
@@ -125,7 +127,8 @@ public class EventHandlerGroup<T>
      * @param handlers the work handlers that will process events. Each work handler instance will provide an extra thread in the worker pool.
      * @return a {@link EventHandlerGroup} that can be used to set up a event processor barrier over the created event processors.
      */
-    public EventHandlerGroup<T> thenHandleEventsWithWorkerPool(final WorkHandler<? super T>... handlers)
+    @SafeVarargs
+    public final EventHandlerGroup<T> thenHandleEventsWithWorkerPool(final WorkHandler<? super T>... handlers)
     {
         return handleEventsWithWorkerPool(handlers);
     }
@@ -142,7 +145,8 @@ public class EventHandlerGroup<T>
      * @param handlers the batch handlers that will process events.
      * @return a {@link EventHandlerGroup} that can be used to set up a event processor barrier over the created event processors.
      */
-    public EventHandlerGroup<T> handleEventsWith(final EventHandler<? super T>... handlers)
+    @SafeVarargs
+    public final EventHandlerGroup<T> handleEventsWith(final EventHandler<? super T>... handlers)
     {
         return disruptor.createEventProcessors(sequences, handlers);
     }
@@ -159,7 +163,8 @@ public class EventHandlerGroup<T>
      * @param eventProcessorFactories the event processor factories to use to create the event processors that will process events.
      * @return a {@link EventHandlerGroup} that can be used to chain dependencies.
      */
-    public EventHandlerGroup<T> handleEventsWith(final EventProcessorFactory<T>... eventProcessorFactories)
+    @SafeVarargs
+    public final EventHandlerGroup<T> handleEventsWith(final EventProcessorFactory<T>... eventProcessorFactories)
     {
         return disruptor.createEventProcessors(sequences, eventProcessorFactories);
     }
@@ -177,7 +182,8 @@ public class EventHandlerGroup<T>
      * @param handlers the work handlers that will process events. Each work handler instance will provide an extra thread in the worker pool.
      * @return a {@link EventHandlerGroup} that can be used to set up a event processor barrier over the created event processors.
      */
-    public EventHandlerGroup<T> handleEventsWithWorkerPool(final WorkHandler<? super T>... handlers)
+    @SafeVarargs
+    public final EventHandlerGroup<T> handleEventsWithWorkerPool(final WorkHandler<? super T>... handlers)
     {
         return disruptor.createWorkerPool(sequences, handlers);
     }
